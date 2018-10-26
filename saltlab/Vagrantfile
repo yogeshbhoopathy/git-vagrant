@@ -1,0 +1,89 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+minions = [
+    ["minion1", 2, "1024"]
+]
+# Vagrantfile API/syntax version. Don't touch unless you know what you're doing!
+VAGRANTFILE_API_VERSION = "2"
+os = "generic/debian9"
+net_ip = "192.168.100"
+start_ip = 10
+domain = "lab.yogi.com"
+
+Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
+    config.vm.define :master, primary: true do |master_config|
+        hosts_file = "
+127.0.0.1    localhost
+127.0.1.1    salt.#{domain}    salt
+#{net_ip}.#{start_ip}    salt.#{domain}    salt
+"
+        $script = <<-SCRIPT
+echo '#{hosts_file}' > /etc/hosts
+mkdir -p /etc/salt
+echo '*.#{domain}' > /etc/salt/autosign.conf
+[ -f "/etc/salt/pki/minion/minion_master.pub" ] && rm /etc/salt/pki/minion/minion_master.pub
+echo 'master: salt.#{domain}' > /etc/salt/minion
+echo 'salt.#{domain}' > /etc/salt/minion_id
+SCRIPT
+
+   master_config.vm.provider "virtualbox" do |vb|
+            vb.memory = "2048"
+            vb.cpus = 4
+            vb.name = "master"
+        end
+        master_config.vm.box = "#{os}"
+        master_config.vm.host_name = 'salt'
+        master_config.vm.network "private_network", ip: "#{net_ip}.#{start_ip}"
+        master_config.vm.synced_folder "saltstack/salt", "/srv/salt"
+        master_config.vm.synced_folder "saltstack/pillar", "/srv/pillar"
+        master_config.vm.synced_folder "../ansible", "/etc/ansible/"
+        master_config.vm.provision "shell", inline: $script
+        master_config.vm.provision :salt do |salt|
+            salt.master_config = "master_config"
+            salt.install_type = "stable"
+            salt.install_master = true
+            salt.verbose = true
+            salt.colorize = true
+        end
+    end
+
+new_ip = start_ip
+   minions.each do |name, cpu, mem|
+       config.vm.define "#{name}" do |minion_config|
+           new_ip = new_ip + 1
+           hosts_file = "
+127.0.0.1    localhost
+
+127.0.1.1    #{name}.#{domain}    #{name}
+#{net_ip}.#{new_ip}    #{name}.#{domain}    #{name}
+#{net_ip}.#{start_ip}    salt.#{domain}    salt
+"
+           $script = <<-SCRIPT
+echo '#{hosts_file}' > /etc/hosts
+mkdir -p /etc/salt
+[ -f "/etc/salt/pki/minion/minion_master.pub" ] && rm /etc/salt/pki/minion/minion_master.pub
+echo 'master: salt.#{domain}' > /etc/salt/minion
+echo '#{name}.#{domain}' > /etc/salt/minion_id
+SCRIPT
+
+           minion_config.vm.provider "virtualbox" do |vb|
+               vb.memory = "#{mem}"
+               vb.cpus = "#{cpu}"
+               vb.name = "#{name}"
+           end
+           minion_config.vm.box = "#{os}"
+           minion_config.vm.hostname = name + "." + domain
+           minion_config.vm.network "private_network", ip: "#{net_ip}.#{new_ip}"
+           minion_config.vm.provision "shell", inline: $script
+           minion_config.vm.provision :salt do |salt|
+               salt.install_type = "stable"
+               salt.verbose = true
+               salt.colorize = true
+           end
+       end
+   end
+end
+
+
+

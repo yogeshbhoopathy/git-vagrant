@@ -1,0 +1,2 @@
+utosign_file: /etc/salt/autosign.conf
+worker_threads: 5
